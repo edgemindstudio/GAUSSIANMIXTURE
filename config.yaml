@@ -1,0 +1,30 @@
+# config.yaml
+
+SEED: 42
+DATA_DIR: USTC-TFC2016_malware        # contains train/test .npy files
+IMG_SHAPE: [40, 40, 1]
+NUM_CLASSES: 9
+
+# Evaluation
+VAL_FRACTION: 0.5
+FID_CAP: 200
+
+# GMM hyperparameters (per class)
+GMM_COMPONENTS: 10        # reduce if classes are small; increase for more modes
+COVARIANCE_TYPE: full     # pipeline will auto-retry with diag/spherical if needed
+REG_COVAR: 1e-4           # extra stability; 1e-6 works too, 1e-4 is safer
+MAX_ITER: 300
+N_INIT: 1
+INIT_PARAMS: kmeans
+RANDOM_STATE: 42
+VERBOSE: 0
+
+# Synthesis
+SAMPLES_PER_CLASS: 25
+
+ARTIFACTS:
+  checkpoints: artifacts/gaussianmixture/checkpoints
+  synthetic:   artifacts/gaussianmixture/synthetic
+  summaries:   artifacts/gaussianmixture/summaries
+  tensorboard: artifacts/tensorboard
+
