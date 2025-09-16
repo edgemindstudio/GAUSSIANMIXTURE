@@ -27,7 +27,11 @@ import joblib
 from sklearn.mixture import GaussianMixture
 
 from gaussianmixture.models import reshape_to_images
-
+from pathlib import Path
+from typing import List, Optional, Tuple
+from datetime import datetime
+# --- PNG helpers (top-level once) ---
+from PIL import Image
 
 # ---------------------------------------------------------------------
 # Loading
@@ -213,9 +217,91 @@ def save_grid_from_dir(
     plt.close(fig)
 
 
+def _to_uint8(img01: np.ndarray) -> np.ndarray:
+    return np.clip(np.round(img01 * 255.0), 0, 255).astype(np.uint8)
+
+def _save_png(img01: np.ndarray, out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    x = img01
+    if x.ndim == 3 and x.shape[-1] == 1:
+        x = x[..., 0]
+        mode = "L"
+    elif x.ndim == 3 and x.shape[-1] == 3:
+        mode = "RGB"
+    else:
+        x = x.squeeze()
+        mode = "L"
+    Image.fromarray(_to_uint8(x), mode=mode).save(out_path)
+
+# --- tiny config getter ---
+def _cfg_get(cfg: dict, dotted: str, default=None):
+    cur = cfg
+    for key in dotted.split("."):
+        if not isinstance(cur, dict) or key not in cur:
+            return default
+        cur = cur[key]
+    return cur
+
+# --- PUBLIC: synth() for the unified CLI ---
+def synth(cfg: dict, output_root: str, seed: int = 42) -> dict:
+    """
+    Generate S PNGs/class into {output_root}/{class}/{seed} and return a manifest.
+    Uses the GMM checkpoints trained by gaussianmixture/train.py.
+    """
+    rng = np.random.default_rng(int(seed))
+
+    # Resolve shape/classes/count from either NEW or LEGACY config keys
+    H, W, C = tuple(_cfg_get(cfg, "IMG_SHAPE", _cfg_get(cfg, "img.shape", [40, 40, 1])))
+    K = int(_cfg_get(cfg, "NUM_CLASSES", _cfg_get(cfg, "num_classes", 9)))
+    S = int(_cfg_get(cfg, "SAMPLES_PER_CLASS", _cfg_get(cfg, "samples_per_class", 25)))
+
+    # Where checkpoints live
+    artifacts_root = Path(_cfg_get(cfg, "paths.artifacts", "artifacts"))
+    ckpt_dir = Path(_cfg_get(cfg, "ARTIFACTS.gaussianmixture_checkpoints",
+                             artifacts_root / "gaussianmixture" / "checkpoints"))
+
+    # Load models and draw a balanced batch (your existing helpers)
+    models, fallback = load_gmms_from_dir(ckpt_dir, K)
+    x_synth, y_onehot = sample_balanced_from_models(
+        models,
+        img_shape=(H, W, C),
+        samples_per_class=S,
+        global_fallback=fallback,
+    )
+
+    # Save PNGs in the layout the CLI expects and build manifest
+    out_root = Path(output_root)
+    labels_int = np.argmax(y_onehot, axis=1).astype(int)
+    per_class_counts: dict[str, int] = {str(k): 0 for k in range(K)}
+    paths: list[dict] = []
+
+    # group indices by class to have deterministic filenames per class
+    for k in range(K):
+        idxs = np.where(labels_int == k)[0]
+        if idxs.size == 0:
+            continue
+        cls_dir = out_root / str(k) / str(seed)
+        cls_dir.mkdir(parents=True, exist_ok=True)
+        for j, i in enumerate(idxs):
+            out_path = cls_dir / f"gmm_{j:05d}.png"
+            _save_png(x_synth[i], out_path)
+            paths.append({"path": str(out_path), "label": int(k)})
+        per_class_counts[str(k)] = int(idxs.size)
+
+    manifest = {
+        "dataset": _cfg_get(cfg, "data.root", _cfg_get(cfg, "DATA_DIR", "USTC-TFC2016_40x40_gray")),
+        "seed": int(seed),
+        "per_class_counts": per_class_counts,
+        "paths": paths,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    return manifest
+
+
 __all__ = [
     "load_gmms_from_dir",
     "sample_balanced_from_models",
     "save_per_class_npy",
     "save_grid_from_dir",
+    "synth",
 ]

@@ -279,6 +279,13 @@ def main():
 
     run_train(cfg)
 
+# ---- Adapter for unified CLI (keep your file's current content) ----
+def train(cfg: dict):
+    """
+    Adapter for the GenCyberSynth unified CLI.
+    The CLI passes a parsed YAML dict; delegate to the repo's runner.
+    """
+    return run_train(cfg)
 
 if __name__ == "__main__":
     main()
